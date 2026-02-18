@@ -4,12 +4,22 @@ from functools import partial
 import numpy as np
 
 from recresid import recresid
+try:
+    from numba_funcs import recresid_numba, ssr_triang_numba_loop
+    HAS_NUMBA = True
+except ImportError:
+    HAS_NUMBA = False
 
 
 def ssr_triang(n, h, X, y, k, intercept_only, use_mp=False):
     """
     Calculates the upper triangular matrix of squared residuals
     """
+    # Use Numba parallel loop if applicable
+    if HAS_NUMBA and not intercept_only:
+        # Note: use_mp is ignored as numba handles parallelism
+        return ssr_triang_numba_loop(n, h, X, y, k)
+        
     fun = ssr_triang_par if use_mp else ssr_triang_seq
     return fun(n, h, X, y, k, intercept_only)
 
@@ -23,7 +33,9 @@ def SSRi(i, n, h, X, y, k, intercept_only):
         arr2 = arr1[:-1]
         ssr = (y[i:] - np.cumsum(y[i:]) / arr1)[1:] * np.sqrt(1 + 1 / arr2)
     else:
+        # Fallback to python recresid if numba not used (e.g. intercept_only or HAS_NUMBA=False)
         ssr = recresid(X[i:], y[i:])
+        
         rval = np.concatenate((np.repeat(np.nan, k), np.cumsum(ssr**2)))
         return rval
 

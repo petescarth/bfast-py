@@ -1,6 +1,12 @@
 import numpy as np
 import statsmodels.api as sm
 
+try:
+    from numba_funcs import fast_ols, fast_predict
+    HAS_NUMBA = True
+except ImportError:
+    HAS_NUMBA = False
+
 import utils
 from datasets import *
 from stl import STL
@@ -13,11 +19,11 @@ class BFASTResult():
         self.trend = Tt
         self.season = St
         self.remainder = Nt
-        if (Vt_bp == np.array([0])).all():
+        if np.array_equal(Vt_bp, np.array([0])):
             self.trend_breakpoints = None
         else:
             self.trend_breakpoints = Vt_bp
-        if Wt_bp == np.array([0]).all():
+        if np.array_equal(Wt_bp, np.array([0])):
             self.season_breakpoints = None
         else:
             self.season_breakpoints = Wt_bp
@@ -98,7 +104,7 @@ class BFAST(utils.LoggingBase):
         output = None
         nan_map = utils.nan_map(Yt)
 
-        while (Vt_bp != CheckTimeTt).any() or (Wt_bp != CheckTimeSt).any() and i < max_iter:
+        while (not np.array_equal(Vt_bp, CheckTimeTt) or not np.array_equal(Wt_bp, CheckTimeSt)) and i < max_iter:
             self.logger.info("BFAST iteration #{}".format(i))
             CheckTimeTt = Vt_bp
             CheckTimeSt = Wt_bp
@@ -126,21 +132,35 @@ class BFAST(utils.LoggingBase):
             self.logger.info("Fitting linear model for trend")
             if nobp_Vt:
                 ## No Change detected
-                fm0 = sm.OLS(Vt, ti, missing='drop').fit()
+                if HAS_NUMBA:
+                    ti_clean, Vt_clean = utils.omit_nans(ti, Vt)
+                    params0 = fast_ols(ti_clean, Vt_clean)
+                    Tt = fast_predict(ti, params0)
+                else:
+                    fm0 = sm.OLS(Vt, ti, missing='drop').fit()
+                    Tt = fm0.predict(exog=ti)  # Overwrite non-missing with fitted values
+                
                 Vt_bp = np.array([0])  # no breaks times
-
-                Tt = fm0.predict(exog=ti)  # Overwrite non-missing with fitted values
                 Tt[np.isnan(Yt)] = np.nan
             else:
                 part = bp_Vt.breakfactor()
                 X1 = utils.partition_matrix(part, sm.add_constant(ti[~np.isnan(Yt)]))
                 y1 = Vt[~np.isnan(Yt)]
 
-                fm1 = sm.OLS(y1, X1, missing='drop').fit()
-                Vt_bp = bp_Vt.breakpoints
+                if HAS_NUMBA:
+                    params1 = fast_ols(X1, y1)
+                    fitted = fast_predict(X1, params1)
+                    # Mock fm1 for params
+                    class FM: pass
+                    fm1 = FM()
+                    fm1.params = params1
+                    Vt_bp = bp_Vt.breakpoints
+                else:
+                    fm1 = sm.OLS(y1, X1, missing='drop').fit()
+                    Vt_bp = bp_Vt.breakpoints
 
                 Tt = np.repeat(np.nan, ti.shape[0])
-                Tt[~np.isnan(Yt)] = fm1.predict()
+                Tt[~np.isnan(Yt)] = fast_predict(X1, fm1.params) if HAS_NUMBA else fm1.predict()
 
             if season == "none":
                 Wt = np.zeros(nrow).astype(float)
@@ -171,22 +191,38 @@ class BFAST(utils.LoggingBase):
                 self.logger.info("Fitting linear model for season")
                 if nobp_Wt:
                     ## No seasonal change detected
-                    sm0 = sm.OLS(Wt, smod, missing='drop').fit()
-                    St = np.repeat(np.nan, nrow)
-                    St[~np.isnan(Yt)] = sm0.predict()  # Overwrite non-missing with fitted values
+                    if HAS_NUMBA:
+                        smod_clean, Wt_clean = utils.omit_nans(smod, Wt)
+                        params_s0 = fast_ols(smod_clean, Wt_clean)
+                        fitted_s0 = fast_predict(smod_clean, params_s0)
+                        
+                        St = np.repeat(np.nan, nrow)
+                        St[~np.isnan(Yt)] = fitted_s0
+                    else:
+                        sm0 = sm.OLS(Wt, smod, missing='drop').fit()
+                        St = np.repeat(np.nan, nrow)
+                        St[~np.isnan(Yt)] = sm0.predict()  # Overwrite non-missing with fitted values
+                    
                     Wt_bp = np.array([0])
                 else:
                     part = bp_Wt.breakfactor()
                     if season in ["dummy", "harmonic"]:
                         X_sm1 = utils.partition_matrix(part, smod1)
 
-                    sm1 = sm.OLS(Wt1, X_sm1, missing='drop').fit()
+                    if HAS_NUMBA:
+                        params_s1 = fast_ols(X_sm1, Wt1)
+                        fitted_s1 = fast_predict(X_sm1, params_s1)
+                        
+                        St = np.repeat(np.nan, nrow)
+                        St[~np.isnan(Yt)] = fitted_s1
+                    else:
+                        sm1 = sm.OLS(Wt1, X_sm1, missing='drop').fit()
+                        # Define empty copy of original time series
+                        St = np.repeat(np.nan, nrow)
+                        St[~np.isnan(Yt)] = sm1.predict()  # Overwrite non-missing with fitted values
+                    
                     # Wt_bp = bp_Wt.breakpoints_no_nans
                     Wt_bp = bp_Wt.breakpoints
-
-                    # Define empty copy of original time series
-                    St = np.repeat(np.nan, nrow)
-                    St[~np.isnan(Yt)] = sm1.predict()  # Overwrite non-missing with fitted values
 
             with np.errstate(invalid="ignore"):
                 Nt = Yt - Tt - St
