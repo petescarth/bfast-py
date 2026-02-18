@@ -5,6 +5,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 
+import os
+
 def r_style_interval(from_tuple, end_tuple, frequency):
     """
     create time interval using R-style double-tuple notation
@@ -17,7 +19,7 @@ def r_style_interval(from_tuple, end_tuple, frequency):
     return real_range
 
 
-data_folder = "../data/"
+data_folder = os.path.join(os.path.dirname(__file__), "../data/")
 
 
 """

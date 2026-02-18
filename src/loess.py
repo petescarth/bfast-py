@@ -31,7 +31,7 @@ def loess(x, y, q, d, rhos=None):
 
 
 if __name__ == "__main__":
-    img_dir = "../report/imgs/"
+    img_dir = "./"
     def plot(d):
         fig = plt.figure(figsize=(15,13))
         plt.rc('font', size=16)

@@ -42,7 +42,7 @@ class STL():
 if __name__ == "__main__":
     Yt = datasets.ndvi
     ti = datasets.ndvi_dates
-    f = datasets.ndvi_freqency
+    f = datasets.ndvi_freq
 
     St = STL(Yt, f, periodic=True)
     print(St.seasonal[99:150])

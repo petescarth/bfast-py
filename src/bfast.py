@@ -207,9 +207,9 @@ class BFAST(utils.LoggingBase):
 
                 y2 = (co[0] + co[r + 1]) + co[r + Vt_nrbp + 2] * ti[Vt_bp[r] + 1]
 
-                Mag[r, 0] = y1
-                Mag[r, 1] = y2
-                Mag[r, 2] = y2 - y1
+                Mag[r, 0] = np.asarray(y1).item()
+                Mag[r, 1] = np.asarray(y2).item()
+                Mag[r, 2] = np.asarray(y2 - y1).item()
 
             index = np.argmin(np.abs(Mag[:, 2]) - 1)
             m_x = np.repeat(Vt_bp[index], 2)
